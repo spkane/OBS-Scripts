@@ -18,17 +18,23 @@ load_dotenv(home / ".obs_scripts.env")
 OBS_HOST = os.getenv('OBS_WS_HOST')
 OBS_PORT = os.getenv('OBS_WS_PORT')
 OBS_PASSWORD = os.getenv('OBS_WS_PW')
-ICON_PATH = os.getenv('OBS_ICON_PATH')
+REC_ICON_PATH = os.getenv('OBS_REC_ICON_PATH')
+PAUSE_ICON_PATH = os.getenv('OBS_PAUSE_ICON_PATH')
 
 recording = False
+pause = False
 window = None
 ws = None
 
-def show_recording_indicator():
+def show_recording_indicator(type="recording"):
     """Create and display the recording indicator window in the top right corner with a slight gap."""
     screen_width, screen_height = sg.Window.get_screen_size()
 
     # Load the image to get its actual size using PIL
+    if type == "recording":
+        ICON_PATH = REC_ICON_PATH
+    elif type == "paused":
+        ICON_PATH = PAUSE_ICON_PATH
     with Image.open(ICON_PATH) as img:
         icon_width, icon_height = img.size
 
@@ -71,12 +77,31 @@ def on_event(message):
             print("Recording started.")
             if not recording:
                 recording = True
-                window = show_recording_indicator()
+                window = show_recording_indicator(type="recording")
                 window.read(timeout=10)
-        elif message.datain['outputState'] == 'OBS_WEBSOCKET_OUTPUT_STOPPED':
-            print("Recording stopped.")
+        if message.datain['outputState'] == 'OBS_WEBSOCKET_OUTPUT_PAUSED':
+            print("Recording paused.")
             if recording:
                 recording = False
+            if not pause:
+                pause = True
+                if window:
+                    window.close()
+                    window = show_recording_indicator(type="paused")
+                    window.read(timeout=10)
+        if message.datain['outputState'] == 'OBS_WEBSOCKET_OUTPUT_RESUMED':
+            print("Recording resumed.")
+            if pause:
+                pause = False
+            if not recording:
+                recording = True
+                window.close()
+                window = show_recording_indicator(type="recording")
+        elif message.datain['outputState'] == 'OBS_WEBSOCKET_OUTPUT_STOPPED':
+            print("Recording stopped.")
+            if recording or pause:
+                recording = False
+                pause = False
                 if window:
                     window.close()
                     window = None
@@ -84,7 +109,7 @@ def on_event(message):
         print(f"Unhandled event: {type(message)}")
 
 def script_description():
-    return "Display recording indicator when OBS starts/stops recording."
+    return "Display recording indicator when OBS starts/stops/pauses recording."
 
 def script_load(settings):
     """Called on script load."""

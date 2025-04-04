@@ -21,21 +21,26 @@ load_dotenv(home / ".obs_scripts.env")
 OBS_HOST = os.getenv('OBS_WS_HOST')
 OBS_PORT = os.getenv('OBS_WS_PORT')
 OBS_PASSWORD = os.getenv('OBS_WS_PW')
-ICON_PATH = os.getenv('OBS_ICON_PATH')
+REC_ICON_PATH = os.getenv('OBS_REC_ICON_PATH')
+PAUSE_ICON_PATH = os.getenv('OBS_PAUSE_ICON_PATH')
 
 # Queue to handle communication between threads
 event_queue = queue.Queue()
 
-def show_recording_indicator():
+def show_recording_indicator(type="recording"):
     """Create and display the recording indicator window in the top right corner with a slight gap."""
     screen_width, screen_height = sg.Window.get_screen_size()
 
     # Load the image to get its actual size using PIL
+    if type == "recording":
+        ICON_PATH = REC_ICON_PATH
+    elif type == "paused":
+        ICON_PATH = PAUSE_ICON_PATH
     with Image.open(ICON_PATH) as img:
         icon_width, icon_height = img.size
 
     # Calculate the position to place it in the top right corner with a gap
-    x_position = screen_width - icon_width - (screen_width * .50)  # Adjusted to create a small gap on the right side
+    x_position = screen_width - icon_width - (screen_width * .85)  # Adjusted to create a small gap on the right side
     y_position = 0  # Top alignment is fine
 
     layout = [[sg.Image(ICON_PATH, size=(255,255))]]
@@ -70,7 +75,7 @@ def handle_obs_events(ws):
 
     ws.register(on_event)
 
-def process_gui_events(window, recording):
+def process_gui_events(window, recording, pause):
     """Handle GUI events on the main thread."""
     while True:
         try:
@@ -84,18 +89,39 @@ def process_gui_events(window, recording):
                 print("Recording started.")
                 if not recording:
                     recording = True
-                    window = show_recording_indicator()
+                    window = show_recording_indicator(type="recording")
+                    window.read(timeout=10)
+            if message.datain['outputState'] == 'OBS_WEBSOCKET_OUTPUT_PAUSED':
+                print("Recording paused.")
+                if recording:
+                    recording = False
+                if not pause:
+                    pause = True
+                    if window:
+                        window.close()
+                        window = show_recording_indicator(type="paused")
+                        window.read(timeout=10)
+            if message.datain['outputState'] == 'OBS_WEBSOCKET_OUTPUT_RESUMED':
+                print("Recording resumed.")
+                if pause:
+                    pause = False
+                if not recording:
+                    recording = True
+                    window.close()
+                    window = show_recording_indicator(type="recording")
                     window.read(timeout=10)
             elif message.datain['outputState'] == 'OBS_WEBSOCKET_OUTPUT_STOPPED':
                 print("Recording stopped.")
-                if recording:
+                if recording or pause:
                     recording = False
+                    pause = False
                     if window:
                         window.close()
                         window = None
 
 def main():
     recording = False
+    pause = False
     window = None
 
     ws = connect_to_obs()
@@ -104,7 +130,7 @@ def main():
     threading.Thread(target=handle_obs_events, args=(ws,)).start()
 
     # Process GUI events on the main thread
-    process_gui_events(window, recording)
+    process_gui_events(window, recording, pause)
 
     try:
         while True:
